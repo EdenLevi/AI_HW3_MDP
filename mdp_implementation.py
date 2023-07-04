@@ -1,7 +1,6 @@
 from copy import deepcopy
 import numpy as np
-import copy # MAKE SURE THIS IS ALLOWED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+import copy
 from numpy import inf
 
 # function VALUE-ITERATION(mdp, ε) return a utility function
@@ -18,7 +17,7 @@ from numpy import inf
 
 def max_expectation(mdp, r, c, U):
     max_sum = float(-inf)
-    action_policy = 'UP'
+    action_policy = None
     for index, action in enumerate(['UP', 'DOWN', 'RIGHT', 'LEFT']):
         prob = mdp.transition_function[action]
         prob_sum = 0
@@ -27,7 +26,7 @@ def max_expectation(mdp, r, c, U):
             prob_sum += float(prob[i])*float(U[next_r][next_c])
         if prob_sum > max_sum:
             max_sum = prob_sum
-            action_policy = index
+            action_policy = action
     return action_policy, max_sum
 
 
@@ -48,13 +47,13 @@ def value_iteration(mdp, U_init, epsilon=10 ** (-3)):
             for c in range(mdp.num_col):
                 reward = mdp.board[r][c]
                 if (r, c) in mdp.terminal_states:
-                    U_tag[r][c] = reward
+                    U_tag[r][c] = float(reward)
                     continue
                 elif reward == 'WALL':
                     U_tag[r][c] = None
                     continue
                 else:  # valid state with reward
-                    reward = round(float(reward), 3)
+                    reward = float(reward)
                     _, curr_expectation = max_expectation(mdp, r, c, U)
                     U_tag[r][c] = reward + mdp.gamma*curr_expectation
                 ssss=abs(U_tag[r][c] - U[r][c])
@@ -66,6 +65,7 @@ def value_iteration(mdp, U_init, epsilon=10 ** (-3)):
     # ========================
 
 
+# TODO: CHECK IF WE NEED TO RETURN POLICY BY NUMBER OR STRING (UP/DOWN..)
 def get_policy(mdp, U):
     # TODO:
     # Given the mdp and the utility of each state - U (which satisfies the Belman equation)
@@ -73,7 +73,7 @@ def get_policy(mdp, U):
     #
 
     # ====== YOUR CODE: ======
-    policy = [[0 for i in range(mdp.num_col)] for i in range(mdp.num_row)]
+    policy = [[None for i in range(mdp.num_col)] for i in range(mdp.num_row)]
     for r in range(mdp.num_row):
         for c in range(mdp.num_col):
             reward = mdp.board[r][c]
@@ -96,41 +96,44 @@ def policy_evaluation(mdp, policy):
     P = [[0 for i in range(mdp.num_col*mdp.num_row)] for i in range(mdp.num_row*mdp.num_col)]
     R = [0 for i in range(mdp.num_col*mdp.num_row)]
     U = [[0 for i in range(mdp.num_col)] for i in range(mdp.num_row)]
-    valid_actions = ['UP', 'DOWN', 'RIGHT', 'LEFT']
+    excluded = []
+    for (r, c) in mdp.terminal_states:
+        R[c + mdp.num_col * r] = float(mdp.board[r][c])
+        excluded.append(c + mdp.num_col * r)
 
-    for i in range(mdp.num_row*mdp.num_col):
-        R[i] = 0
-
-    for r in range(mdp.num_row*mdp.num_col):
-        for c in range(mdp.num_row*mdp.num_col):
-            P[r][c] = 0
 
 
     for r in range(mdp.num_row):
         for c in range(mdp.num_col):
             reward = mdp.board[r][c]
             if (r, c) in mdp.terminal_states:
-                R[c + mdp.num_col * r] = 0
                 continue
             elif reward == 'WALL':
+                excluded.append(c + mdp.num_col * r)
                 continue
             else:  # valid state with reward
+                P[c + mdp.num_col * r][c + mdp.num_col * r] += 1
                 R[c+mdp.num_col*r] = float(reward)
-
                 for i, next_action in enumerate(['UP', 'DOWN', 'RIGHT', 'LEFT']):
                     next_r, next_c = mdp.step((r, c), next_action)
-                    prev_action = valid_actions[policy[r][c]]
-                    P[c+mdp.num_col*r][next_c+mdp.num_col*next_r] = -(mdp.gamma * (mdp.transition_function[prev_action])[i])
+                    prev_action = policy[r][c]
+                    if (next_r, next_c) in mdp.terminal_states:
+                        R[c + mdp.num_col * r] += float(mdp.board[next_r][next_c])*(mdp.gamma * float((mdp.transition_function[prev_action][i])))
+                    elif mdp.board[next_r][next_c] == 'WALL':
+                        continue
+                    else:
+                        P[c+mdp.num_col*r][next_c+mdp.num_col*next_r] -= (mdp.gamma * float((mdp.transition_function[prev_action])[i]))
 
-    print("P: ", P)
-    print("R: ", R)
-
-    print("P dimensions:", len(P), "x", len(P[0]))
-    print("R dimensions:", len(R), "x", "1")
-
-    print("P Rank:", np.linalg.matrix_rank(P))
+    for exclude in reversed(sorted(excluded)):
+        P = np.delete(P, exclude, axis=1)
+        P = np.delete(P, exclude, axis=0)
+        R = np.delete(R, exclude, axis=0)
 
     x = np.linalg.solve(P, R)
+
+    for exclude in sorted(excluded):
+        x = np.insert(x, exclude, 0)
+
     for r in range(mdp.num_row):
         for c in range(mdp.num_col):
             if (r, c) in mdp.terminal_states:
@@ -151,5 +154,28 @@ def policy_iteration(mdp, policy_init):
     #
 
     # ====== YOUR CODE: ======
-    raise NotImplementedError
+    U = [[0 for i in range(mdp.num_col)] for i in range(mdp.num_row)]
+
+    while True:
+        U = policy_evaluation(mdp, policy_init)
+        unchanged = True
+        for r in range(mdp.num_row):
+            for c in range(mdp.num_col):
+                if (r, c) in mdp.terminal_states:
+                    continue
+                elif mdp.board[r][c] == 'WALL':
+                    continue
+                else:  # valid state with reward
+                    policy, curr_expectation = max_expectation(mdp, r, c, U)
+                    prob = mdp.transition_function[policy_init[r][c]]
+                    prob_sum = 0
+                    for i, next_action in enumerate(['UP', 'DOWN', 'RIGHT', 'LEFT']):
+                        next_r, next_c = mdp.step((r, c), next_action)
+                        prob_sum += float(prob[i]) * float(U[next_r][next_c])
+                    if curr_expectation > prob_sum:
+                        policy_init[r][c] = policy
+                        unchanged = False
+        if unchanged:
+            break
+    return policy_init
     # ========================
